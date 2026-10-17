@@ -604,16 +604,41 @@ const root = document.documentElement;
 const fullscreenSupported = document.fullscreenEnabled || document.webkitFullscreenEnabled;
 const isFullscreen = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
 
-function toggleFullscreen() {
+// Browser bisa keluar dari layar penuh sendiri (mis. saat muncul dialog izin) dan
+// kadang statusnya tertinggal. Karena itu setiap hasil dicek, dan kegagalan selalu
+// diberi tahu lewat toast supaya tombol tidak terlihat "mati".
+let fullscreenPending = false;
+
+async function toggleFullscreen() {
+  const request = root.requestFullscreen || root.webkitRequestFullscreen;
+  const exit = document.exitFullscreen || document.webkitExitFullscreen;
+  if (!request) return toast("Layar penuh tidak didukung di browser ini");
+  if (fullscreenPending) return;
+  fullscreenPending = true;
+
   try {
     if (isFullscreen()) {
-      (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-    } else {
-      const p = (root.requestFullscreen || root.webkitRequestFullscreen).call(root, { navigationUI: "hide" });
-      p?.catch?.(() => toast("Layar penuh tidak diizinkan"));
+      try {
+        await exit.call(document);
+        return;
+      } catch (err) {
+        // Status "layar penuh" ternyata basi: lanjut minta layar penuh lagi.
+        console.warn("exitFullscreen gagal, mencoba masuk lagi:", err);
+      }
     }
-  } catch {
-    toast("Layar penuh tidak didukung");
+    await Promise.race([
+      Promise.resolve(request.call(root, { navigationUI: "hide" })),
+      wait(2000).then(() => {
+        throw new Error("browser tidak merespons");
+      }),
+    ]);
+    if (!isFullscreen()) throw new Error("browser menolak tanpa alasan");
+  } catch (err) {
+    console.warn("Layar penuh gagal:", err);
+    toast(`Layar penuh gagal: ${err.message}`);
+  } finally {
+    fullscreenPending = false;
+    onFullscreenChange();
   }
 }
 
@@ -626,6 +651,7 @@ function onFullscreenChange() {
 $("fullscreenBtn").hidden = !fullscreenSupported;
 document.addEventListener("fullscreenchange", onFullscreenChange);
 document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+document.addEventListener("fullscreenerror", () => toast("Browser menolak layar penuh"));
 
 // ---------- Panel pengaturan ----------
 function renderSettings() {
