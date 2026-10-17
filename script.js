@@ -629,7 +629,9 @@ async function toggleFullscreen() {
     await Promise.race([
       Promise.resolve(request.call(root, { navigationUI: "hide" })),
       wait(2000).then(() => {
-        throw new Error("browser tidak merespons");
+        // Chrome kadang "macet" per tab setelah keluar paksa dari layar penuh;
+        // refresh tidak cukup, tab harus ditutup lalu dibuka lagi.
+        throw new Error("browser tidak merespons. Tutup tab ini lalu buka lagi web-nya");
       }),
     ]);
     if (!isFullscreen()) throw new Error("browser menolak tanpa alasan");
