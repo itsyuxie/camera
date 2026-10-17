@@ -2,61 +2,90 @@
 <html lang="id">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Web Camera</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#000000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Kamera</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📷</text></svg>">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main class="app">
-    <header class="topbar">
-      <h1>📷 Web Camera</h1>
-      <div class="top-actions">
-        <select id="cameraSelect" aria-label="Pilih kamera"></select>
-        <button id="mirrorBtn" class="chip active" title="Cermin">⇋ Mirror</button>
-      </div>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-timer" viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></symbol>
+    <symbol id="i-mirror" viewBox="0 0 24 24"><path d="M12 3v18M8 7l-5 5 5 5V7zM16 7l5 5-5 5V7z"/></symbol>
+    <symbol id="i-switch" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15V3M8 7l4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M5 21h14"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M9 7V4h6v3"/></symbol>
+  </svg>
+
+  <main class="cam" id="cam">
+    <video id="video" autoplay playsinline muted></video>
+    <div id="gridOverlay" class="grid-overlay" hidden></div>
+    <div id="countdown" class="countdown" hidden></div>
+    <div id="flash" class="flash"></div>
+    <div id="message" class="message">
+      <p id="messageText">Mengaktifkan kamera…</p>
+      <button id="retryBtn" class="pill" hidden>Coba lagi</button>
+    </div>
+    <div id="toast" class="toast" hidden></div>
+
+    <header class="top">
+      <button id="timerBtn" class="icon-btn" aria-label="Timer">
+        <svg><use href="#i-timer"/></svg><span id="timerLabel" class="badge" hidden></span>
+      </button>
+      <button id="gridBtn" class="icon-btn" aria-label="Garis bantu"><svg><use href="#i-grid"/></svg></button>
+      <button id="mirrorBtn" class="icon-btn" aria-label="Cermin"><svg><use href="#i-mirror"/></svg></button>
     </header>
 
-    <section class="viewer">
-      <video id="video" autoplay playsinline muted></video>
-      <div id="countdown" class="countdown" hidden></div>
-      <div id="flash" class="flash"></div>
-      <div id="message" class="message">Mengaktifkan kamera…</div>
-    </section>
-
-    <nav class="filters" id="filters">
-      <button class="chip active" data-filter="none">Normal</button>
-      <button class="chip" data-filter="grayscale(1)">B&amp;W</button>
-      <button class="chip" data-filter="sepia(1)">Sepia</button>
-      <button class="chip" data-filter="saturate(2) contrast(1.1)">Vivid</button>
-      <button class="chip" data-filter="contrast(1.3) brightness(0.9)">Drama</button>
-      <button class="chip" data-filter="hue-rotate(180deg)">Invert Hue</button>
-      <button class="chip" data-filter="blur(2px)">Blur</button>
-    </nav>
-
-    <div class="controls">
-      <button id="timerBtn" class="round small" title="Timer">⏱ <span id="timerLabel">Off</span></button>
-      <button id="shutterBtn" class="shutter" title="Ambil foto" aria-label="Ambil foto"></button>
-      <button id="switchBtn" class="round small" title="Ganti kamera">🔄</button>
-    </div>
-
-    <section class="gallery-wrap">
-      <div class="gallery-head">
-        <h2>Galeri <span id="count">(0)</span></h2>
-        <button id="clearBtn" class="link">Hapus semua</button>
+    <footer class="bottom">
+      <div class="filters" id="filters">
+        <button class="filter active" data-filter="none">Normal</button>
+        <button class="filter" data-filter="saturate(1.6) contrast(1.05)">Vivid</button>
+        <button class="filter" data-filter="sepia(.35) saturate(1.4) hue-rotate(-10deg) brightness(1.05)">Hangat</button>
+        <button class="filter" data-filter="saturate(.9) hue-rotate(15deg) brightness(1.05)">Sejuk</button>
+        <button class="filter" data-filter="grayscale(1) contrast(1.15)">Mono</button>
+        <button class="filter" data-filter="sepia(.8) contrast(.95)">Vintage</button>
+        <button class="filter" data-filter="contrast(1.35) brightness(.9) saturate(1.1)">Drama</button>
+        <button class="filter" data-filter="brightness(1.15) saturate(.8) contrast(.9)">Pudar</button>
       </div>
-      <div id="gallery" class="gallery"></div>
-      <p id="emptyNote" class="empty">Belum ada foto. Tekan tombol bulat untuk memotret.</p>
-    </section>
+
+      <div class="controls">
+        <button id="thumbBtn" class="thumb" aria-label="Buka galeri"><img id="thumbImg" alt="" hidden></button>
+        <button id="shutterBtn" class="shutter" aria-label="Ambil foto" disabled></button>
+        <button id="switchBtn" class="icon-btn big" aria-label="Ganti kamera"><svg><use href="#i-switch"/></svg></button>
+      </div>
+    </footer>
   </main>
 
-  <dialog id="preview">
-    <img id="previewImg" alt="Pratinjau foto">
-    <div class="dialog-actions">
-      <a id="downloadLink" class="btn" download>⬇ Unduh</a>
-      <button id="deleteBtn" class="btn danger">🗑 Hapus</button>
-      <button id="closeBtn" class="btn ghost">Tutup</button>
-    </div>
-  </dialog>
+  <section id="gallery" class="sheet" hidden>
+    <header class="sheet-head">
+      <button id="galleryBack" class="icon-btn plain" aria-label="Kembali"><svg><use href="#i-back"/></svg></button>
+      <h2>Galeri <span id="count"></span></h2>
+      <button id="clearBtn" class="text-btn danger">Hapus semua</button>
+    </header>
+    <div id="galleryGrid" class="gallery-grid"></div>
+    <p id="emptyNote" class="empty">Belum ada foto.</p>
+  </section>
+
+  <section id="viewer" class="viewer" hidden>
+    <header class="viewer-head">
+      <button id="viewerClose" class="icon-btn" aria-label="Tutup"><svg><use href="#i-close"/></svg></button>
+      <span id="viewerIndex"></span>
+      <span class="spacer"></span>
+    </header>
+    <img id="viewerImg" alt="Foto">
+    <footer class="viewer-actions">
+      <button id="shareBtn" class="action"><svg><use href="#i-share"/></svg><span>Bagikan</span></button>
+      <button id="downloadBtn" class="action"><svg><use href="#i-download"/></svg><span>Simpan</span></button>
+      <button id="deleteBtn" class="action danger"><svg><use href="#i-trash"/></svg><span>Hapus</span></button>
+    </footer>
+  </section>
 
   <canvas id="canvas" hidden></canvas>
   <script src="script.js"></script>
