@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Web Camera</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <h1>📷 Web Camera</h1>
+      <div class="top-actions">
+        <select id="cameraSelect" aria-label="Pilih kamera"></select>
+        <button id="mirrorBtn" class="chip active" title="Cermin">⇋ Mirror</button>
+      </div>
+    </header>
+
+    <section class="viewer">
+      <video id="video" autoplay playsinline muted></video>
+      <div id="countdown" class="countdown" hidden></div>
+      <div id="flash" class="flash"></div>
+      <div id="message" class="message">Mengaktifkan kamera…</div>
+    </section>
+
+    <nav class="filters" id="filters">
+      <button class="chip active" data-filter="none">Normal</button>
+      <button class="chip" data-filter="grayscale(1)">B&amp;W</button>
+      <button class="chip" data-filter="sepia(1)">Sepia</button>
+      <button class="chip" data-filter="saturate(2) contrast(1.1)">Vivid</button>
+      <button class="chip" data-filter="contrast(1.3) brightness(0.9)">Drama</button>
+      <button class="chip" data-filter="hue-rotate(180deg)">Invert Hue</button>
+      <button class="chip" data-filter="blur(2px)">Blur</button>
+    </nav>
+
+    <div class="controls">
+      <button id="timerBtn" class="round small" title="Timer">⏱ <span id="timerLabel">Off</span></button>
+      <button id="shutterBtn" class="shutter" title="Ambil foto" aria-label="Ambil foto"></button>
+      <button id="switchBtn" class="round small" title="Ganti kamera">🔄</button>
+    </div>
+
+    <section class="gallery-wrap">
+      <div class="gallery-head">
+        <h2>Galeri <span id="count">(0)</span></h2>
+        <button id="clearBtn" class="link">Hapus semua</button>
+      </div>
+      <div id="gallery" class="gallery"></div>
+      <p id="emptyNote" class="empty">Belum ada foto. Tekan tombol bulat untuk memotret.</p>
+    </section>
+  </main>
+
+  <dialog id="preview">
+    <img id="previewImg" alt="Pratinjau foto">
+    <div class="dialog-actions">
+      <a id="downloadLink" class="btn" download>⬇ Unduh</a>
+      <button id="deleteBtn" class="btn danger">🗑 Hapus</button>
+      <button id="closeBtn" class="btn ghost">Tutup</button>
+    </div>
+  </dialog>
+
+  <canvas id="canvas" hidden></canvas>
+  <script src="script.js"></script>
+</body>
+</html>
