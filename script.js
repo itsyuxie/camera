@@ -48,7 +48,8 @@ const state = {
   filter: "none",
   mirror: true,
   mirrorTouched: false,
-  grid: false,
+  guide: "off",
+  spiralTurn: 0,
   timerIndex: 0,
   mode: "photo",
   busy: false,
@@ -248,8 +249,7 @@ function applyView() {
   video.style.filter = state.filter;
   video.classList.toggle("mirror", state.mirror);
   $("mirrorBtn").classList.toggle("on", state.mirror);
-  $("gridBtn").classList.toggle("on", state.grid);
-  $("gridOverlay").hidden = !state.grid;
+  renderGuide();
   cam.classList.toggle("video", state.mode === "video");
   shutterBtn.setAttribute("aria-label", state.mode === "video" ? "Mulai rekam" : "Ambil foto");
 }
@@ -272,7 +272,71 @@ function frameRect() {
   return { x: (cw - w) / 2, y: Math.max(0, top), w, h };
 }
 
+// ---------- Garis bantu: grid 3×3, rasio emas (phi), spiral emas ----------
+const GUIDES = ["off", "grid", "phi", "spiral"];
+const GUIDE_NAMES = {
+  off: "Garis bantu mati",
+  grid: "Grid 3×3",
+  phi: "Rasio emas (Phi grid)",
+  spiral: "Spiral emas · ketuk layar untuk memutar",
+};
+const PHI = (1 + Math.sqrt(5)) / 2;
+
+// Spiral emas di dalam persegi panjang W×H (landscape, W/H = phi):
+// potong persegi berulang kali (kiri, atas, kanan, bawah) dan gambar seperempat lingkaran di tiap persegi.
+function goldenSpiral(W, H, steps = 9) {
+  let x = 0, y = 0, w = W, h = H;
+  let d = `M0 ${H}`;
+  const squares = [];
+  for (let i = 0; i < steps; i++) {
+    let s, ex, ey;
+    switch (i % 4) {
+      case 0: s = h; squares.push([x, y, s, s]); ex = x + s; ey = y; x += s; w -= s; break;
+      case 1: s = w; squares.push([x, y, s, s]); ex = x + s; ey = y + s; y += s; h -= s; break;
+      case 2: s = h; squares.push([x + w - s, y, s, s]); ex = x + w - s; ey = y + s; w -= s; break;
+      case 3: s = w; squares.push([x, y + h - s, s, s]); ex = x; ey = y + h - s; h -= s; break;
+    }
+    d += ` A${s} ${s} 0 0 1 ${ex} ${ey}`;
+  }
+  return { d, squares };
+}
+
+function renderGuide() {
+  const svg = $("guide");
+  const g = state.guide;
+  svg.toggleAttribute("hidden", g === "off"); // elemen SVG tidak punya properti .hidden
+  $("gridBtn").classList.toggle("on", g !== "off");
+  $("guideIcon").setAttribute("href", g === "phi" ? "#i-phi" : g === "spiral" ? "#i-spiral" : "#i-grid");
+  if (g === "off") return;
+
+  const line = (x1, y1, x2, y2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
+  if (g === "grid" || g === "phi") {
+    const a = g === "grid" ? 100 / 3 : 100 / PHI ** 2;
+    const b = 100 - a;
+    svg.setAttribute("viewBox", "0 0 100 100");
+    svg.innerHTML = `<g class="lines">${line(a, 0, a, 100)}${line(b, 0, b, 100)}${line(0, a, 100, a)}${line(0, b, 100, b)}</g>`;
+    return;
+  }
+
+  // Spiral: dibuat landscape lalu diputar/dibalik; diregangkan agar pas bingkai.
+  const f = frameRect();
+  const portrait = f.h > f.w;
+  const W = 100 * PHI, H = 100;
+  const { d, squares } = goldenSpiral(W, H);
+  const turn = state.spiralTurn;
+  const flipX = turn === 1 || turn === 2;
+  const flipY = turn === 2 || turn === 3;
+  let t = `translate(${flipX ? W : 0} ${flipY ? H : 0}) scale(${flipX ? -1 : 1} ${flipY ? -1 : 1})`;
+  if (portrait) t = `translate(${H} 0) rotate(90) ${t}`;
+  svg.setAttribute("viewBox", portrait ? `0 0 ${H} ${W}` : `0 0 ${W} ${H}`);
+  svg.innerHTML = `<g transform="${t}">
+    <g class="lines faint">${squares.map(([x, y, w, h]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}"/>`).join("")}</g>
+    <path class="spiral" d="${d}"/>
+  </g>`;
+}
+
 function layoutFrame() {
+  if (state.guide === "spiral") renderGuide();
   const f = frameRect();
   Object.assign($("frame").style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.w}px`, height: `${f.h}px` });
   $("frame").classList.toggle("masked", settings.ratio !== "full");
@@ -739,8 +803,16 @@ $("timerBtn").addEventListener("click", () => {
 });
 
 $("gridBtn").addEventListener("click", () => {
-  state.grid = !state.grid;
-  applyView();
+  state.guide = GUIDES[(GUIDES.indexOf(state.guide) + 1) % GUIDES.length];
+  renderGuide();
+  toast(GUIDE_NAMES[state.guide]);
+});
+
+// Ketuk layar saat spiral aktif untuk memutar arah spiral.
+cam.addEventListener("click", (e) => {
+  if (state.guide !== "spiral" || e.target.closest("button, .filters, .modes")) return;
+  state.spiralTurn = (state.spiralTurn + 1) % 4;
+  renderGuide();
 });
 
 $("mirrorBtn").addEventListener("click", () => {

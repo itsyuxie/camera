@@ -83,16 +83,20 @@ svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width:
 
 .ratio-btn span { font-size: .68rem; font-weight: 700; letter-spacing: .02em; }
 
-.grid-overlay {
+.guide {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
-  background:
-    linear-gradient(to right, transparent calc(33.33% - .5px), rgba(255,255,255,.35) calc(33.33% - .5px), rgba(255,255,255,.35) calc(33.33% + .5px), transparent calc(33.33% + .5px),
-      transparent calc(66.66% - .5px), rgba(255,255,255,.35) calc(66.66% - .5px), rgba(255,255,255,.35) calc(66.66% + .5px), transparent calc(66.66% + .5px)),
-    linear-gradient(to bottom, transparent calc(33.33% - .5px), rgba(255,255,255,.35) calc(33.33% - .5px), rgba(255,255,255,.35) calc(33.33% + .5px), transparent calc(33.33% + .5px),
-      transparent calc(66.66% - .5px), rgba(255,255,255,.35) calc(66.66% - .5px), rgba(255,255,255,.35) calc(66.66% + .5px), transparent calc(66.66% + .5px));
+  fill: none;
+  stroke: rgba(255, 255, 255, .5);
+  stroke-width: 1;
+  overflow: visible;
 }
+.guide * { vector-effect: non-scaling-stroke; }
+.guide .faint { stroke: rgba(255, 255, 255, .22); }
+.guide .spiral { stroke: rgba(255, 255, 255, .75); stroke-width: 1.5; }
 
 .message {
   position: absolute;
