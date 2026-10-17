@@ -6,8 +6,38 @@ const canvas = $("canvas");
 const shutterBtn = $("shutterBtn");
 const gallery = $("gallery");
 const viewer = $("viewer");
+const settingsEl = $("settings");
+const viewerVideo = $("viewerVideo");
 
 const TIMERS = [0, 3, 10];
+
+// ---------- Pengaturan (disimpan di localStorage) ----------
+const SETTINGS_KEY = "kamera-settings";
+const DEFAULTS = {
+  resolution: 1080,
+  quality: 0.95,
+  videoSize: 720,
+  audio: true,
+  sound: true,
+  vibrate: true,
+  autoSave: false,
+};
+
+function loadSettings() {
+  try {
+    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") };
+  } catch {
+    return { ...DEFAULTS };
+  }
+}
+
+function saveSettings() {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {}
+}
+
+const settings = loadSettings();
 
 const state = {
   stream: null,
@@ -18,12 +48,13 @@ const state = {
   mirrorTouched: false,
   grid: false,
   timerIndex: 0,
+  mode: "photo",
   busy: false,
-  photos: [], // { id, blob, url, time } — terbaru di depan
+  items: [], // { id, type: "photo"|"video", blob, poster, duration, time, url, posterUrl } — terbaru di depan
   viewIndex: 0,
 };
 
-// ---------- Penyimpanan (IndexedDB) supaya foto tidak hilang saat refresh ----------
+// ---------- Penyimpanan (IndexedDB) supaya foto/video tidak hilang saat refresh ----------
 const db = {
   conn: null,
   open() {
@@ -45,14 +76,23 @@ const db = {
     });
   },
   all() { return this.tx("readonly", (s) => s.getAll()); },
-  put(p) { return this.tx("readwrite", (s) => s.put({ id: p.id, blob: p.blob, time: p.time })); },
+  put(item) {
+    const { id, type, blob, poster, duration, time } = item;
+    return this.tx("readwrite", (s) => s.put({ id, type, blob, poster, duration, time }));
+  },
   remove(id) { return this.tx("readwrite", (s) => s.delete(id)); },
   clear() { return this.tx("readwrite", (s) => s.clear()); },
 };
 
 // ---------- Utilitas ----------
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-const vibrate = (p) => navigator.vibrate?.(p);
+const vibrate = (p) => settings.vibrate && navigator.vibrate?.(p);
+const toBlob = (c, type, q) => new Promise((r) => c.toBlob(r, type, q));
+
+function formatTime(sec) {
+  const s = Math.max(0, Math.round(sec));
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
 
 function toast(text) {
   const el = $("toast");
@@ -61,7 +101,7 @@ function toast(text) {
   void el.offsetWidth;
   el.hidden = false;
   clearTimeout(toast.t);
-  toast.t = setTimeout(() => (el.hidden = true), 1600);
+  toast.t = setTimeout(() => (el.hidden = true), 2200);
 }
 
 function showMessage(text, retry = false) {
@@ -70,10 +110,49 @@ function showMessage(text, retry = false) {
   $("retryBtn").hidden = !retry;
 }
 
-function fileName(photo) {
-  const d = new Date(photo.time);
+function restartAnim(el, cls) {
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+}
+
+function fileName(item) {
+  const d = new Date(item.time);
   const pad = (n) => String(n).padStart(2, "0");
-  return `IMG_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.jpg`;
+  const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  if (item.type === "video") return `VID_${stamp}.${item.blob.type.includes("mp4") ? "mp4" : "webm"}`;
+  return `IMG_${stamp}.jpg`;
+}
+
+// ---------- Suara ----------
+let audioCtx;
+function playSound(kind) {
+  if (!settings.sound) return;
+  try {
+    audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+    const out = audioCtx.createGain();
+    out.connect(audioCtx.destination);
+    const now = audioCtx.currentTime;
+    if (kind === "shutter") {
+      const len = Math.floor(audioCtx.sampleRate * 0.09);
+      const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 3;
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      out.gain.value = 0.5;
+      src.connect(out);
+      src.start();
+    } else {
+      const osc = audioCtx.createOscillator();
+      osc.frequency.value = kind === "start" ? 880 : 660;
+      out.gain.setValueAtTime(0.15, now);
+      out.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+      osc.connect(out);
+      osc.start(now);
+      osc.stop(now + 0.2);
+    }
+  } catch {}
 }
 
 // ---------- Kamera ----------
@@ -89,17 +168,19 @@ async function startCamera() {
   const constraints = state.deviceId
     ? { deviceId: { exact: state.deviceId } }
     : { facingMode: { ideal: state.facingMode } };
+  const res = settings.resolution;
 
   try {
     state.stream = await navigator.mediaDevices.getUserMedia({
-      video: { ...constraints, width: { ideal: 1920 }, height: { ideal: 1920 } },
+      video: { ...constraints, width: { ideal: Math.round((res * 16) / 9) }, height: { ideal: res } },
       audio: false,
     });
     video.srcObject = state.stream;
     await video.play().catch(() => {});
 
-    const settings = state.stream.getVideoTracks()[0].getSettings();
-    if (settings.facingMode) state.facingMode = settings.facingMode;
+    const track = state.stream.getVideoTracks()[0];
+    const s = track.getSettings();
+    if (s.facingMode) state.facingMode = s.facingMode;
     // Kamera depan dicerminkan seperti aplikasi kamera bawaan, kecuali diatur manual.
     if (!state.mirrorTouched) state.mirror = state.facingMode !== "environment";
     applyView();
@@ -122,10 +203,7 @@ async function startCamera() {
 }
 
 async function switchCamera() {
-  const btn = $("switchBtn");
-  btn.classList.remove("spin");
-  void btn.offsetWidth;
-  btn.classList.add("spin");
+  restartAnim($("switchBtn"), "spin");
 
   const before = state.stream?.getVideoTracks()[0]?.getSettings().deviceId;
   state.deviceId = null;
@@ -153,9 +231,32 @@ function applyView() {
   $("mirrorBtn").classList.toggle("on", state.mirror);
   $("gridBtn").classList.toggle("on", state.grid);
   $("gridOverlay").hidden = !state.grid;
+  cam.classList.toggle("video", state.mode === "video");
+  shutterBtn.setAttribute("aria-label", state.mode === "video" ? "Mulai rekam" : "Ambil foto");
 }
 
-// ---------- Memotret ----------
+// Area video yang terlihat di layar (object-fit: cover), supaya hasil = yang dilihat.
+function visibleCrop() {
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  const viewRatio = cam.clientWidth / cam.clientHeight;
+  let sw = vw, sh = vh;
+  if (vw / vh > viewRatio) sw = vh * viewRatio;
+  else sh = vw / viewRatio;
+  return { sx: (vw - sw) / 2, sy: (vh - sh) / 2, sw, sh };
+}
+
+function drawFrame(ctx, crop, w, h) {
+  ctx.save();
+  ctx.filter = state.filter;
+  if (state.mirror) {
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.drawImage(video, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, w, h);
+  ctx.restore();
+}
+
 async function countdown(seconds) {
   const el = $("countdown");
   el.hidden = false;
@@ -167,110 +268,252 @@ async function countdown(seconds) {
   el.hidden = true;
 }
 
+// ---------- Foto ----------
 async function takePhoto() {
-  if (state.busy || shutterBtn.disabled) return;
   state.busy = true;
   shutterBtn.classList.add("busy");
 
   const seconds = TIMERS[state.timerIndex];
   if (seconds) await countdown(seconds);
 
-  // Potong sesuai area yang terlihat di layar (object-fit: cover).
-  const vw = video.videoWidth;
-  const vh = video.videoHeight;
-  const viewRatio = cam.clientWidth / cam.clientHeight;
-  let sw = vw, sh = vh;
-  if (vw / vh > viewRatio) sw = vh * viewRatio;
-  else sh = vw / viewRatio;
-  const sx = (vw - sw) / 2;
-  const sy = (vh - sh) / 2;
+  const crop = visibleCrop();
+  canvas.width = Math.round(crop.sw);
+  canvas.height = Math.round(crop.sh);
+  drawFrame(canvas.getContext("2d"), crop, canvas.width, canvas.height);
 
-  canvas.width = Math.round(sw);
-  canvas.height = Math.round(sh);
-  const ctx = canvas.getContext("2d");
-  ctx.save();
-  ctx.filter = state.filter;
-  if (state.mirror) {
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
-  }
-  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-  ctx.restore();
-
-  const flash = $("flash");
-  flash.classList.remove("on");
-  void flash.offsetWidth;
-  flash.classList.add("on");
+  restartAnim($("flash"), "on");
+  playSound("shutter");
   vibrate(30);
 
-  const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.92));
-  const photo = { id: crypto.randomUUID?.() || String(Date.now()), blob, time: Date.now() };
-  photo.url = URL.createObjectURL(blob);
-  state.photos.unshift(photo);
-  db.put(photo);
+  const blob = await toBlob(canvas, "image/jpeg", settings.quality);
+  addItem({ type: "photo", blob });
 
-  updateThumb(true);
   state.busy = false;
   shutterBtn.classList.remove("busy");
 }
 
+// ---------- Video ----------
+const rec = { recorder: null, chunks: [], draw: 0, tick: 0, start: 0, poster: null, mic: null, canvas: document.createElement("canvas") };
+
+function pickMimeType() {
+  const types = [
+    "video/mp4;codecs=avc1,mp4a",
+    "video/mp4",
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
+    "video/webm",
+  ];
+  return types.find((t) => MediaRecorder.isTypeSupported?.(t)) || "";
+}
+
+async function startRecording() {
+  if (!window.MediaRecorder || !rec.canvas.captureStream) {
+    toast("Browser ini tidak mendukung rekam video");
+    return;
+  }
+  state.busy = true;
+  shutterBtn.classList.add("busy");
+
+  const seconds = TIMERS[state.timerIndex];
+  if (seconds) await countdown(seconds);
+
+  // Gambar ulang video ke canvas (dengan filter, cermin, dan potongan layar) lalu rekam canvas-nya.
+  const crop = visibleCrop();
+  const scale = Math.min(1, settings.videoSize / Math.min(crop.sw, crop.sh));
+  const w = (rec.canvas.width = Math.round((crop.sw * scale) / 2) * 2);
+  const h = (rec.canvas.height = Math.round((crop.sh * scale) / 2) * 2);
+  const ctx = rec.canvas.getContext("2d");
+  drawFrame(ctx, crop, w, h);
+  rec.draw = setInterval(() => drawFrame(ctx, crop, w, h), 1000 / 30);
+  rec.poster = await toBlob(rec.canvas, "image/jpeg", 0.8);
+
+  const stream = rec.canvas.captureStream(30);
+  if (settings.audio) {
+    try {
+      rec.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      rec.mic.getAudioTracks().forEach((t) => stream.addTrack(t));
+    } catch {
+      toast("Mikrofon tidak diizinkan, merekam tanpa suara");
+    }
+  }
+
+  const mimeType = pickMimeType();
+  try {
+    rec.recorder = new MediaRecorder(stream, {
+      ...(mimeType && { mimeType }),
+      videoBitsPerSecond: settings.videoSize >= 1080 ? 8_000_000 : 4_000_000,
+    });
+  } catch (err) {
+    cleanupRecording();
+    toast(`Gagal merekam: ${err.message}`);
+    return;
+  }
+  rec.chunks = [];
+  rec.recorder.ondataavailable = (e) => e.data.size && rec.chunks.push(e.data);
+  rec.recorder.onstop = finishRecording;
+  rec.recorder.start(1000);
+
+  rec.start = Date.now();
+  $("recTime").textContent = "00:00";
+  rec.tick = setInterval(() => ($("recTime").textContent = formatTime((Date.now() - rec.start) / 1000)), 500);
+  cam.classList.add("recording");
+  shutterBtn.setAttribute("aria-label", "Berhenti rekam");
+  playSound("start");
+  vibrate(40);
+
+  state.busy = false;
+  shutterBtn.classList.remove("busy");
+}
+
+function stopRecording() {
+  if (!rec.recorder || rec.recorder.state === "inactive") return;
+  rec.recorder.stop();
+  clearInterval(rec.tick);
+  cam.classList.remove("recording");
+  applyView();
+  playSound("stop");
+  vibrate([30, 60, 30]);
+}
+
+function cleanupRecording() {
+  clearInterval(rec.draw);
+  rec.mic?.getTracks().forEach((t) => t.stop());
+  rec.mic = null;
+  rec.recorder = null;
+  state.busy = false;
+  shutterBtn.classList.remove("busy");
+}
+
+function finishRecording() {
+  const duration = (Date.now() - rec.start) / 1000;
+  const type = rec.recorder.mimeType || rec.chunks[0]?.type || "video/webm";
+  const blob = new Blob(rec.chunks, { type });
+  cleanupRecording();
+  if (blob.size) addItem({ type: "video", blob, poster: rec.poster, duration });
+}
+
+function onShutter() {
+  if (shutterBtn.disabled) return;
+  if (rec.recorder) return stopRecording();
+  if (state.busy) return;
+  if (state.mode === "video") startRecording();
+  else takePhoto();
+}
+
+function setMode(mode) {
+  if (rec.recorder || state.busy) return;
+  state.mode = mode;
+  document.querySelectorAll(".mode").forEach((m) => m.classList.toggle("active", m.dataset.mode === mode));
+  applyView();
+}
+
 // ---------- Galeri ----------
+function withUrls(item) {
+  item.url = URL.createObjectURL(item.blob);
+  item.posterUrl = item.poster ? URL.createObjectURL(item.poster) : null;
+  return item;
+}
+
+function revokeUrls(item) {
+  URL.revokeObjectURL(item.url);
+  if (item.posterUrl) URL.revokeObjectURL(item.posterUrl);
+}
+
+function addItem({ type, blob, poster = null, duration = 0 }) {
+  const item = withUrls({ id: crypto.randomUUID?.() || String(Date.now()), type, blob, poster, duration, time: Date.now() });
+  state.items.unshift(item);
+  db.put(item);
+  updateThumb(true);
+  if (settings.autoSave) download(item, false);
+}
+
 function updateThumb(bump = false) {
   const img = $("thumbImg");
-  const latest = state.photos[0];
+  const latest = state.items[0];
   img.hidden = !latest;
-  if (latest) img.src = latest.url;
-  if (bump) {
-    const btn = $("thumbBtn");
-    btn.classList.remove("bump");
-    void btn.offsetWidth;
-    btn.classList.add("bump");
-  }
+  if (latest) img.src = latest.posterUrl || latest.url;
+  if (bump) restartAnim($("thumbBtn"), "bump");
 }
 
 function renderGallery() {
   const grid = $("galleryGrid");
   grid.innerHTML = "";
-  state.photos.forEach((photo, i) => {
+  state.items.forEach((item, i) => {
+    const tile = document.createElement("button");
+    tile.className = "tile";
+    tile.setAttribute("aria-label", item.type === "video" ? "Video" : "Foto");
     const img = document.createElement("img");
-    img.src = photo.url;
+    img.src = item.posterUrl || item.url;
     img.alt = "";
     img.loading = "lazy";
-    img.addEventListener("click", () => openViewer(i));
-    grid.append(img);
+    tile.append(img);
+    if (item.type === "video") {
+      const dur = document.createElement("span");
+      dur.className = "dur";
+      dur.textContent = formatTime(item.duration);
+      tile.append(dur);
+    }
+    tile.addEventListener("click", () => openViewer(i));
+    grid.append(tile);
   });
-  $("count").textContent = state.photos.length ? `(${state.photos.length})` : "";
-  $("emptyNote").hidden = state.photos.length > 0;
-  $("clearBtn").hidden = state.photos.length === 0;
+  const n = state.items.length;
+  $("count").textContent = n ? `(${n})` : "";
+  grid.hidden = n === 0;
+  $("emptyNote").hidden = n > 0;
+  $("clearBtn").hidden = n === 0;
 }
 
-function openGallery() {
-  renderGallery();
-  gallery.hidden = false;
-  history.pushState({ view: "gallery" }, "");
+// ---------- Panel di atas kamera (galeri, penampil, pengaturan) ----------
+// Tombol "kembali" di HP menutup panel teratas, bukan keluar dari web.
+function openPanel(el) {
+  el.hidden = false;
+  history.pushState({ panel: el.id }, "");
 }
+
+function closePanel(el) {
+  if (!el.hidden) history.back();
+}
+
+window.addEventListener("popstate", () => {
+  const top = [viewer, settingsEl, gallery].find((el) => !el.hidden);
+  if (!top) return;
+  top.hidden = true;
+  if (top === viewer) viewerVideo.pause();
+});
 
 function openViewer(index) {
   state.viewIndex = index;
-  showPhoto();
-  viewer.hidden = false;
-  history.pushState({ view: "viewer" }, "");
+  showItem();
+  openPanel(viewer);
 }
 
-function showPhoto() {
-  const photo = state.photos[state.viewIndex];
-  if (!photo) return closeViewer();
-  $("viewerImg").src = photo.url;
-  $("viewerIndex").textContent = `${state.viewIndex + 1} / ${state.photos.length}`;
+function showItem() {
+  const item = state.items[state.viewIndex];
+  if (!item) return closePanel(viewer);
+  const isVideo = item.type === "video";
+  viewerVideo.pause();
+  $("viewerImg").hidden = isVideo;
+  viewerVideo.hidden = !isVideo;
+  if (isVideo) {
+    viewerVideo.poster = item.posterUrl || "";
+    viewerVideo.src = item.url;
+  } else {
+    viewerVideo.removeAttribute("src");
+    $("viewerImg").src = item.url;
+  }
+  $("viewerIndex").textContent = `${state.viewIndex + 1} / ${state.items.length}`;
 }
 
-function closeViewer() {
-  if (!viewer.hidden) history.back();
+function step(delta) {
+  const next = state.viewIndex + delta;
+  if (next < 0 || next >= state.items.length) return;
+  state.viewIndex = next;
+  showItem();
 }
 
-async function sharePhoto() {
-  const photo = state.photos[state.viewIndex];
-  const file = new File([photo.blob], fileName(photo), { type: "image/jpeg" });
+async function shareItem() {
+  const item = state.items[state.viewIndex];
+  const file = new File([item.blob], fileName(item), { type: item.blob.type || "image/jpeg" });
   if (navigator.canShare?.({ files: [file] })) {
     try {
       await navigator.share({ files: [file] });
@@ -278,62 +521,124 @@ async function sharePhoto() {
       if (e.name !== "AbortError") toast("Gagal membagikan");
     }
   } else {
-    downloadPhoto();
+    download(item);
   }
 }
 
-function downloadPhoto() {
-  const photo = state.photos[state.viewIndex];
+function download(item, notify = true) {
   const a = document.createElement("a");
-  a.href = photo.url;
-  a.download = fileName(photo);
+  a.href = item.url;
+  a.download = fileName(item);
   a.click();
-  toast("Foto diunduh");
+  if (notify) toast(item.type === "video" ? "Video diunduh" : "Foto diunduh");
 }
 
-function deletePhoto() {
-  const [photo] = state.photos.splice(state.viewIndex, 1);
-  URL.revokeObjectURL(photo.url);
-  db.remove(photo.id);
+function deleteItem() {
+  const [item] = state.items.splice(state.viewIndex, 1);
+  revokeUrls(item);
+  db.remove(item.id);
   updateThumb();
   renderGallery();
-  toast("Foto dihapus");
-  if (!state.photos.length) return closeViewer();
-  state.viewIndex = Math.min(state.viewIndex, state.photos.length - 1);
-  showPhoto();
+  toast(item.type === "video" ? "Video dihapus" : "Foto dihapus");
+  if (!state.items.length) return closePanel(viewer);
+  state.viewIndex = Math.min(state.viewIndex, state.items.length - 1);
+  showItem();
 }
 
-// Geser kiri/kanan di penampil foto
+// Geser kiri/kanan di penampil
 let touchX = null;
-$("viewerImg").addEventListener("touchstart", (e) => (touchX = e.touches[0].clientX), { passive: true });
-$("viewerImg").addEventListener("touchend", (e) => {
+$("viewerStage").addEventListener("touchstart", (e) => (touchX = e.touches[0].clientX), { passive: true });
+$("viewerStage").addEventListener("touchend", (e) => {
   if (touchX === null) return;
   const dx = e.changedTouches[0].clientX - touchX;
   touchX = null;
-  if (Math.abs(dx) < 50) return;
-  const next = state.viewIndex + (dx < 0 ? 1 : -1);
-  if (next >= 0 && next < state.photos.length) {
-    state.viewIndex = next;
-    showPhoto();
-  }
+  if (Math.abs(dx) > 50) step(dx < 0 ? 1 : -1);
 });
 
-// Tombol "kembali" di HP menutup penampil/galeri, bukan keluar dari web.
-window.addEventListener("popstate", () => {
-  if (!viewer.hidden) viewer.hidden = true;
-  else if (!gallery.hidden) gallery.hidden = true;
+// ---------- Layar penuh ----------
+const root = document.documentElement;
+const fullscreenSupported = document.fullscreenEnabled || document.webkitFullscreenEnabled;
+const isFullscreen = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+
+function toggleFullscreen() {
+  try {
+    if (isFullscreen()) {
+      (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    } else {
+      const p = (root.requestFullscreen || root.webkitRequestFullscreen).call(root, { navigationUI: "hide" });
+      p?.catch?.(() => toast("Layar penuh tidak diizinkan"));
+    }
+  } catch {
+    toast("Layar penuh tidak didukung");
+  }
+}
+
+function onFullscreenChange() {
+  const on = isFullscreen();
+  $("fullscreenIcon").setAttribute("href", on ? "#i-shrink" : "#i-expand");
+  $("fullscreenBtn").setAttribute("aria-label", on ? "Keluar layar penuh" : "Layar penuh");
+}
+
+$("fullscreenBtn").hidden = !fullscreenSupported;
+document.addEventListener("fullscreenchange", onFullscreenChange);
+document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+
+// ---------- Panel pengaturan ----------
+function renderSettings() {
+  document.querySelectorAll(".seg").forEach((seg) => {
+    const key = seg.dataset.setting;
+    seg.querySelectorAll("button").forEach((b) => b.classList.toggle("active", Number(b.dataset.value) === settings[key]));
+  });
+  document.querySelectorAll(".switch").forEach((sw) => (sw.checked = !!settings[sw.dataset.setting]));
+}
+
+document.querySelectorAll(".seg").forEach((seg) => {
+  seg.addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    const key = seg.dataset.setting;
+    const value = Number(btn.dataset.value);
+    if (settings[key] === value) return;
+    settings[key] = value;
+    saveSettings();
+    renderSettings();
+    if (key === "resolution") startCamera();
+  });
+});
+
+document.querySelectorAll(".switch").forEach((sw) => {
+  sw.addEventListener("change", () => {
+    settings[sw.dataset.setting] = sw.checked;
+    saveSettings();
+  });
 });
 
 // ---------- Event ----------
-shutterBtn.addEventListener("click", takePhoto);
+shutterBtn.addEventListener("click", onShutter);
 $("switchBtn").addEventListener("click", switchCamera);
 $("retryBtn").addEventListener("click", startCamera);
-$("thumbBtn").addEventListener("click", openGallery);
-$("galleryBack").addEventListener("click", () => history.back());
-$("viewerClose").addEventListener("click", closeViewer);
-$("shareBtn").addEventListener("click", sharePhoto);
-$("downloadBtn").addEventListener("click", downloadPhoto);
-$("deleteBtn").addEventListener("click", deletePhoto);
+$("fullscreenBtn").addEventListener("click", toggleFullscreen);
+$("thumbBtn").addEventListener("click", () => {
+  renderGallery();
+  openPanel(gallery);
+});
+$("galleryBack").addEventListener("click", () => closePanel(gallery));
+$("emptyBack").addEventListener("click", () => closePanel(gallery));
+$("viewerClose").addEventListener("click", () => closePanel(viewer));
+$("shareBtn").addEventListener("click", shareItem);
+$("downloadBtn").addEventListener("click", () => download(state.items[state.viewIndex]));
+$("deleteBtn").addEventListener("click", deleteItem);
+$("settingsBtn").addEventListener("click", () => {
+  renderSettings();
+  openPanel(settingsEl);
+});
+$("settingsBackdrop").addEventListener("click", () => closePanel(settingsEl));
+$("settingsDone").addEventListener("click", () => closePanel(settingsEl));
+
+$("modes").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-mode]");
+  if (btn) setMode(btn.dataset.mode);
+});
 
 $("timerBtn").addEventListener("click", () => {
   state.timerIndex = (state.timerIndex + 1) % TIMERS.length;
@@ -366,9 +671,9 @@ $("filters").addEventListener("click", (e) => {
 });
 
 $("clearBtn").addEventListener("click", () => {
-  if (!confirm("Hapus semua foto?")) return;
-  state.photos.forEach((p) => URL.revokeObjectURL(p.url));
-  state.photos = [];
+  if (!confirm("Hapus semua foto dan video?")) return;
+  state.items.forEach(revokeUrls);
+  state.items = [];
   db.clear();
   updateThumb();
   renderGallery();
@@ -376,20 +681,25 @@ $("clearBtn").addEventListener("click", () => {
 
 document.addEventListener("keydown", (e) => {
   if (!viewer.hidden) {
-    if (e.key === "Escape") closeViewer();
-    if (e.key === "ArrowRight" && state.viewIndex < state.photos.length - 1) { state.viewIndex++; showPhoto(); }
-    if (e.key === "ArrowLeft" && state.viewIndex > 0) { state.viewIndex--; showPhoto(); }
+    if (e.key === "Escape") closePanel(viewer);
+    if (e.key === "ArrowRight") step(1);
+    if (e.key === "ArrowLeft") step(-1);
+  } else if (!settingsEl.hidden) {
+    if (e.key === "Escape") closePanel(settingsEl);
   } else if (!gallery.hidden) {
-    if (e.key === "Escape") history.back();
+    if (e.key === "Escape") closePanel(gallery);
   } else if (e.code === "Space" || e.key === "Enter") {
     e.preventDefault();
-    takePhoto();
+    onShutter();
+  } else if (e.key === "f") {
+    toggleFullscreen();
   }
 });
 
-// Matikan kamera saat tab disembunyikan (hemat baterai), nyalakan lagi saat kembali.
+// Matikan kamera saat pindah aplikasi/tab (hemat baterai), nyalakan lagi saat kembali.
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
+    stopRecording();
     state.stream?.getTracks().forEach((t) => t.stop());
     state.stream = null;
   } else {
@@ -402,9 +712,9 @@ document.addEventListener("visibilitychange", () => {
   applyView();
   await db.open();
   const saved = (await db.all()) || [];
-  state.photos = saved
-    .sort((a, b) => b.time - a.time)
-    .map((p) => ({ ...p, url: URL.createObjectURL(p.blob) }));
+  state.items = saved
+    .map((p) => withUrls({ type: "photo", ...p }))
+    .sort((a, b) => b.time - a.time);
   updateThumb();
   startCamera();
 })();

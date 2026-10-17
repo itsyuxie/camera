@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Kamera</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📷</text></svg>">
-  <link rel="stylesheet" href="style.css?v=2">
+  <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -17,11 +17,15 @@
     <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></symbol>
     <symbol id="i-mirror" viewBox="0 0 24 24"><path d="M12 3v18M8 7l-5 5 5 5V7zM16 7l5 5-5 5V7z"/></symbol>
     <symbol id="i-switch" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+    <symbol id="i-shrink" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></symbol>
     <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
     <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15V3M8 7l4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></symbol>
     <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M5 21h14"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M9 7V4h6v3"/></symbol>
+    <symbol id="i-photos" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/></symbol>
   </svg>
 
   <main class="cam" id="cam">
@@ -36,11 +40,16 @@
     <div id="toast" class="toast" hidden></div>
 
     <header class="top">
-      <button id="timerBtn" class="icon-btn" aria-label="Timer">
-        <svg><use href="#i-timer"/></svg><span id="timerLabel" class="badge" hidden></span>
-      </button>
-      <button id="gridBtn" class="icon-btn" aria-label="Garis bantu"><svg><use href="#i-grid"/></svg></button>
-      <button id="mirrorBtn" class="icon-btn" aria-label="Cermin"><svg><use href="#i-mirror"/></svg></button>
+      <button id="settingsBtn" class="icon-btn" aria-label="Pengaturan"><svg><use href="#i-settings"/></svg></button>
+      <div class="top-center">
+        <button id="timerBtn" class="icon-btn" aria-label="Timer">
+          <svg><use href="#i-timer"/></svg><span id="timerLabel" class="badge" hidden></span>
+        </button>
+        <button id="gridBtn" class="icon-btn" aria-label="Garis bantu"><svg><use href="#i-grid"/></svg></button>
+        <button id="mirrorBtn" class="icon-btn" aria-label="Cermin"><svg><use href="#i-mirror"/></svg></button>
+      </div>
+      <button id="fullscreenBtn" class="icon-btn" aria-label="Layar penuh"><svg><use id="fullscreenIcon" href="#i-expand"/></svg></button>
+      <div id="recPill" class="rec-pill"><i></i><span id="recTime">00:00</span></div>
     </header>
 
     <footer class="bottom">
@@ -53,6 +62,11 @@
         <button class="filter" data-filter="sepia(.8) contrast(.95)">Vintage</button>
         <button class="filter" data-filter="contrast(1.35) brightness(.9) saturate(1.1)">Drama</button>
         <button class="filter" data-filter="brightness(1.15) saturate(.8) contrast(.9)">Pudar</button>
+      </div>
+
+      <div class="modes" id="modes">
+        <button class="mode active" data-mode="photo">Foto</button>
+        <button class="mode" data-mode="video">Video</button>
       </div>
 
       <div class="controls">
@@ -70,7 +84,11 @@
       <button id="clearBtn" class="text-btn danger">Hapus semua</button>
     </header>
     <div id="galleryGrid" class="gallery-grid"></div>
-    <p id="emptyNote" class="empty">Belum ada foto.</p>
+    <div id="emptyNote" class="empty">
+      <svg><use href="#i-photos"/></svg>
+      <p>Belum ada foto atau video</p>
+      <button id="emptyBack" class="pill">Mulai memotret</button>
+    </div>
   </section>
 
   <section id="viewer" class="viewer" hidden>
@@ -79,7 +97,10 @@
       <span id="viewerIndex"></span>
       <span class="spacer"></span>
     </header>
-    <img id="viewerImg" alt="Foto">
+    <div id="viewerStage" class="viewer-stage">
+      <img id="viewerImg" alt="Foto">
+      <video id="viewerVideo" controls playsinline hidden></video>
+    </div>
     <footer class="viewer-actions">
       <button id="shareBtn" class="action"><svg><use href="#i-share"/></svg><span>Bagikan</span></button>
       <button id="downloadBtn" class="action"><svg><use href="#i-download"/></svg><span>Simpan</span></button>
@@ -87,7 +108,59 @@
     </footer>
   </section>
 
+  <section id="settings" class="modal" hidden>
+    <div class="modal-backdrop" id="settingsBackdrop"></div>
+    <div class="modal-panel" role="dialog" aria-labelledby="settingsTitle">
+      <div class="handle"></div>
+      <h3 id="settingsTitle">Pengaturan</h3>
+
+      <p class="group-label">Kamera</p>
+      <div class="group">
+        <div class="row">
+          <span>Resolusi</span>
+          <div class="seg" data-setting="resolution">
+            <button data-value="720">720p</button>
+            <button data-value="1080">1080p</button>
+            <button data-value="2160">4K</button>
+          </div>
+        </div>
+        <div class="row">
+          <span>Kualitas foto</span>
+          <div class="seg" data-setting="quality">
+            <button data-value="0.7">Hemat</button>
+            <button data-value="0.85">Sedang</button>
+            <button data-value="0.95">Tinggi</button>
+          </div>
+        </div>
+      </div>
+
+      <p class="group-label">Video</p>
+      <div class="group">
+        <div class="row">
+          <span>Kualitas video</span>
+          <div class="seg" data-setting="videoSize">
+            <button data-value="720">720p</button>
+            <button data-value="1080">1080p</button>
+          </div>
+        </div>
+        <label class="row"><span>Rekam suara</span><input type="checkbox" class="switch" data-setting="audio"></label>
+      </div>
+
+      <p class="group-label">Lainnya</p>
+      <div class="group">
+        <label class="row"><span>Suara rana</span><input type="checkbox" class="switch" data-setting="sound"></label>
+        <label class="row"><span>Getar</span><input type="checkbox" class="switch" data-setting="vibrate"></label>
+        <label class="row">
+          <span>Unduh otomatis<small>Simpan ke perangkat setiap selesai memotret/merekam</small></span>
+          <input type="checkbox" class="switch" data-setting="autoSave">
+        </label>
+      </div>
+
+      <button id="settingsDone" class="done-btn">Selesai</button>
+    </div>
+  </section>
+
   <canvas id="canvas" hidden></canvas>
-  <script src="script.js?v=2"></script>
+  <script src="script.js?v=3"></script>
 </body>
 </html>
