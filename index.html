@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Kamera</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📷</text></svg>">
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -30,7 +30,7 @@
 
   <main class="cam" id="cam">
     <video id="video" autoplay playsinline muted></video>
-    <div id="gridOverlay" class="grid-overlay" hidden></div>
+    <div id="frame" class="frame"><div id="gridOverlay" class="grid-overlay" hidden></div></div>
     <div id="countdown" class="countdown" hidden></div>
     <div id="flash" class="flash"></div>
     <div id="message" class="message">
@@ -42,6 +42,7 @@
     <header class="top">
       <button id="settingsBtn" class="icon-btn" aria-label="Pengaturan"><svg><use href="#i-settings"/></svg></button>
       <div class="top-center">
+        <button id="ratioBtn" class="icon-btn ratio-btn" aria-label="Rasio"><span id="ratioLabel">FULL</span></button>
         <button id="timerBtn" class="icon-btn" aria-label="Timer">
           <svg><use href="#i-timer"/></svg><span id="timerLabel" class="badge" hidden></span>
         </button>
@@ -125,6 +126,15 @@
           </div>
         </div>
         <div class="row">
+          <span>Rasio</span>
+          <div class="seg" data-setting="ratio">
+            <button data-value="full">Full</button>
+            <button data-value="9:16">9:16</button>
+            <button data-value="3:4">3:4</button>
+            <button data-value="1:1">1:1</button>
+          </div>
+        </div>
+        <div class="row">
           <span>Kualitas foto</span>
           <div class="seg" data-setting="quality">
             <button data-value="0.7">Hemat</button>
@@ -141,6 +151,14 @@
           <div class="seg" data-setting="videoSize">
             <button data-value="720">720p</button>
             <button data-value="1080">1080p</button>
+          </div>
+        </div>
+        <div class="row">
+          <span>Frame rate</span>
+          <div class="seg" data-setting="fps">
+            <button data-value="24">24</button>
+            <button data-value="30">30</button>
+            <button data-value="60">60 fps</button>
           </div>
         </div>
         <label class="row"><span>Rekam suara</span><input type="checkbox" class="switch" data-setting="audio"></label>
@@ -161,6 +179,6 @@
   </section>
 
   <canvas id="canvas" hidden></canvas>
-  <script src="script.js?v=3"></script>
+  <script src="script.js?v=4"></script>
 </body>
 </html>

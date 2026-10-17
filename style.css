@@ -72,6 +72,17 @@ svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width:
 }
 .cam video.mirror { transform: scaleX(-1); }
 
+/* Bingkai rasio: area di luar bingkai digelapkan seperti aplikasi kamera bawaan */
+.frame {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition: left .25s, top .25s, width .25s, height .25s, box-shadow .25s;
+}
+.frame.masked { box-shadow: 0 0 0 200vmax rgba(0, 0, 0, .88); }
+
+.ratio-btn span { font-size: .68rem; font-weight: 700; letter-spacing: .02em; }
+
 .grid-overlay {
   position: absolute;
   inset: 0;
@@ -153,7 +164,7 @@ svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width:
   padding: calc(var(--safe-top) + 14px) 16px 28px;
   background: linear-gradient(to bottom, rgba(0,0,0,.5), transparent);
 }
-.top-center { display: flex; gap: 14px; }
+.top-center { display: flex; gap: 10px; }
 
 .icon-btn {
   position: relative;
@@ -303,7 +314,7 @@ svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width:
 .cam.recording .shutter::after { inset: 21px; border-radius: 6px; }
 
 /* Saat merekam: sembunyikan kontrol yang tidak relevan */
-.cam.recording .top > .icon-btn,
+.cam.recording #settingsBtn,
 .cam.recording .top-center,
 .cam.recording .filters,
 .cam.recording .modes,

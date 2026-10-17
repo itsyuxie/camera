@@ -15,8 +15,10 @@ const TIMERS = [0, 3, 10];
 const SETTINGS_KEY = "kamera-settings";
 const DEFAULTS = {
   resolution: 1080,
+  ratio: "full",
   quality: 0.95,
   videoSize: 720,
+  fps: 30,
   audio: true,
   sound: true,
   vibrate: true,
@@ -169,12 +171,29 @@ async function startCamera() {
     ? { deviceId: { exact: state.deviceId } }
     : { facingMode: { ideal: state.facingMode } };
   const res = settings.resolution;
+  const videoConstraints = {
+    ...constraints,
+    width: { ideal: Math.round((res * 16) / 9) },
+    height: { ideal: res },
+    frameRate: { ideal: settings.fps },
+  };
+  // Izin mikrofon diminta sekarang (bersama kamera), bukan saat mulai rekam:
+  // dialog izin di tengah jalan membuat browser keluar dari layar penuh.
+  const wantAudio = settings.audio && !state.micDenied;
 
   try {
-    state.stream = await navigator.mediaDevices.getUserMedia({
-      video: { ...constraints, width: { ideal: Math.round((res * 16) / 9) }, height: { ideal: res } },
-      audio: false,
-    });
+    try {
+      state.stream = await navigator.mediaDevices.getUserMedia({
+        video: videoConstraints,
+        audio: wantAudio && { echoCancellation: true, noiseSuppression: true },
+      });
+    } catch (err) {
+      if (!wantAudio || !["NotAllowedError", "NotFoundError", "NotReadableError"].includes(err.name)) throw err;
+      // Mungkin hanya mikrofon yang bermasalah: coba lagi tanpa suara.
+      state.stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
+      state.micDenied = true;
+      toast("Mikrofon tidak tersedia, video akan direkam tanpa suara");
+    }
     video.srcObject = state.stream;
     await video.play().catch(() => {});
 
@@ -235,15 +254,48 @@ function applyView() {
   shutterBtn.setAttribute("aria-label", state.mode === "video" ? "Mulai rekam" : "Ambil foto");
 }
 
-// Area video yang terlihat di layar (object-fit: cover), supaya hasil = yang dilihat.
+// ---------- Rasio bingkai ----------
+const RATIOS = ["full", "9:16", "3:4", "1:1"];
+
+// Posisi bingkai foto di layar (relatif terhadap .cam), sesuai rasio yang dipilih.
+function frameRect() {
+  const cw = cam.clientWidth;
+  const ch = cam.clientHeight;
+  if (settings.ratio === "full") return { x: 0, y: 0, w: cw, h: ch };
+  const [a, b] = settings.ratio.split(":").map(Number);
+  const r = cw > ch ? b / a : a / b; // lebar/tinggi; dibalik saat landscape
+  let w = cw, h = cw / r;
+  if (h > ch) { h = ch; w = ch * r; }
+  const landscape = cw > ch;
+  // Di HP tegak, taruh bingkai sedikit di atas supaya tidak tertutup tombol bawah.
+  const top = landscape ? (ch - h) / 2 : Math.min((ch - h) / 2, 72);
+  return { x: (cw - w) / 2, y: Math.max(0, top), w, h };
+}
+
+function layoutFrame() {
+  const f = frameRect();
+  Object.assign($("frame").style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.w}px`, height: `${f.h}px` });
+  $("frame").classList.toggle("masked", settings.ratio !== "full");
+  $("ratioLabel").textContent = settings.ratio === "full" ? "FULL" : settings.ratio;
+}
+
+// Bagian video yang ada di dalam bingkai (video ditampilkan object-fit: cover),
+// supaya hasil foto/video sama persis dengan yang terlihat.
 function visibleCrop() {
   const vw = video.videoWidth;
   const vh = video.videoHeight;
-  const viewRatio = cam.clientWidth / cam.clientHeight;
-  let sw = vw, sh = vh;
-  if (vw / vh > viewRatio) sw = vh * viewRatio;
-  else sh = vw / viewRatio;
-  return { sx: (vw - sw) / 2, sy: (vh - sh) / 2, sw, sh };
+  const cw = cam.clientWidth;
+  const ch = cam.clientHeight;
+  const scale = Math.max(cw / vw, ch / vh);
+  const ox = (cw - vw * scale) / 2;
+  const oy = (ch - vh * scale) / 2;
+  const f = frameRect();
+  const sw = f.w / scale;
+  const sh = f.h / scale;
+  let sx = (f.x - ox) / scale;
+  const sy = (f.y - oy) / scale;
+  if (state.mirror) sx = vw - sx - sw;
+  return { sx, sy, sw, sh };
 }
 
 function drawFrame(ctx, crop, w, h) {
@@ -293,11 +345,12 @@ async function takePhoto() {
 }
 
 // ---------- Video ----------
-const rec = { recorder: null, chunks: [], draw: 0, tick: 0, start: 0, poster: null, mic: null, canvas: document.createElement("canvas") };
+const rec = { recorder: null, chunks: [], draw: 0, tick: 0, start: 0, poster: null, canvas: document.createElement("canvas") };
 
 function pickMimeType() {
   const types = [
-    "video/mp4;codecs=avc1,mp4a",
+    // H.264 + AAC paling mudah diputar di mana saja (WhatsApp, iPhone, galeri HP).
+    "video/mp4;codecs=avc1,mp4a.40.2",
     "video/mp4",
     "video/webm;codecs=vp9,opus",
     "video/webm;codecs=vp8,opus",
@@ -324,18 +377,11 @@ async function startRecording() {
   const h = (rec.canvas.height = Math.round((crop.sh * scale) / 2) * 2);
   const ctx = rec.canvas.getContext("2d");
   drawFrame(ctx, crop, w, h);
-  rec.draw = setInterval(() => drawFrame(ctx, crop, w, h), 1000 / 30);
+  rec.draw = setInterval(() => drawFrame(ctx, crop, w, h), 1000 / settings.fps);
   rec.poster = await toBlob(rec.canvas, "image/jpeg", 0.8);
 
-  const stream = rec.canvas.captureStream(30);
-  if (settings.audio) {
-    try {
-      rec.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-      rec.mic.getAudioTracks().forEach((t) => stream.addTrack(t));
-    } catch {
-      toast("Mikrofon tidak diizinkan, merekam tanpa suara");
-    }
-  }
+  const stream = rec.canvas.captureStream(settings.fps);
+  if (settings.audio) state.stream.getAudioTracks().forEach((t) => stream.addTrack(t));
 
   const mimeType = pickMimeType();
   try {
@@ -377,8 +423,6 @@ function stopRecording() {
 
 function cleanupRecording() {
   clearInterval(rec.draw);
-  rec.mic?.getTracks().forEach((t) => t.stop());
-  rec.mic = null;
   rec.recorder = null;
   state.busy = false;
   shutterBtn.classList.remove("busy");
@@ -587,7 +631,7 @@ document.addEventListener("webkitfullscreenchange", onFullscreenChange);
 function renderSettings() {
   document.querySelectorAll(".seg").forEach((seg) => {
     const key = seg.dataset.setting;
-    seg.querySelectorAll("button").forEach((b) => b.classList.toggle("active", Number(b.dataset.value) === settings[key]));
+    seg.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.value === String(settings[key])));
   });
   document.querySelectorAll(".switch").forEach((sw) => (sw.checked = !!settings[sw.dataset.setting]));
 }
@@ -596,22 +640,39 @@ document.querySelectorAll(".seg").forEach((seg) => {
   seg.addEventListener("click", (e) => {
     const btn = e.target.closest("button");
     if (!btn) return;
-    const key = seg.dataset.setting;
-    const value = Number(btn.dataset.value);
-    if (settings[key] === value) return;
-    settings[key] = value;
-    saveSettings();
-    renderSettings();
-    if (key === "resolution") startCamera();
+    setSetting(seg.dataset.setting, btn.dataset.value);
   });
 });
 
+function setSetting(key, raw) {
+  const value = typeof DEFAULTS[key] === "number" ? Number(raw) : raw;
+  if (settings[key] === value) return;
+  settings[key] = value;
+  saveSettings();
+  renderSettings();
+  if (key === "ratio") layoutFrame();
+  if (key === "resolution" || key === "fps") startCamera();
+}
+
 document.querySelectorAll(".switch").forEach((sw) => {
   sw.addEventListener("change", () => {
-    settings[sw.dataset.setting] = sw.checked;
+    const key = sw.dataset.setting;
+    settings[key] = sw.checked;
     saveSettings();
+    if (key === "audio" && sw.checked) {
+      state.micDenied = false;
+      startCamera();
+    }
   });
 });
+
+$("ratioBtn").addEventListener("click", () => {
+  if (rec.recorder) return;
+  setSetting("ratio", RATIOS[(RATIOS.indexOf(settings.ratio) + 1) % RATIOS.length]);
+  toast(settings.ratio === "full" ? "Rasio layar penuh" : `Rasio ${settings.ratio}`);
+});
+
+window.addEventListener("resize", layoutFrame);
 
 // ---------- Event ----------
 shutterBtn.addEventListener("click", onShutter);
@@ -710,6 +771,7 @@ document.addEventListener("visibilitychange", () => {
 // ---------- Mulai ----------
 (async () => {
   applyView();
+  layoutFrame();
   await db.open();
   const saved = (await db.all()) || [];
   state.items = saved
