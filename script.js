@@ -266,10 +266,7 @@ function frameRect() {
   const r = cw > ch ? b / a : a / b; // lebar/tinggi; dibalik saat landscape
   let w = cw, h = cw / r;
   if (h > ch) { h = ch; w = ch * r; }
-  const landscape = cw > ch;
-  // Di HP tegak, taruh bingkai sedikit di atas supaya tidak tertutup tombol bawah.
-  const top = landscape ? (ch - h) / 2 : Math.min((ch - h) / 2, 72);
-  return { x: (cw - w) / 2, y: Math.max(0, top), w, h };
+  return { x: (cw - w) / 2, y: (ch - h) / 2, w, h };
 }
 
 // ---------- Garis bantu: grid 3×3, rasio emas (phi), spiral emas ----------
